@@ -26,33 +26,6 @@ export type SocialProfile = {
   avatar: string;
 };
 
-export type OrdinalData = {
-  types?: string[];
-  insc?: Inscription;
-  map?: { [key: string]: any };
-  b?: File;
-  sigma?: Sigma[];
-  list?: Listing;
-  bsv20?: Bsv20;
-  lock?: Lock;
-};
-
-export type Lock = {
-  until: number;
-};
-
-export type Sigma = {
-  algorithm: string;
-  address: string;
-  signature: string;
-  vin: number;
-};
-
-export type Listing = {
-  price: number;
-  payout: string;
-};
-
 export interface Bsv20Balance {
   confirmed: bigint;
   pending: bigint;
@@ -106,71 +79,11 @@ export interface OrdSchema {
   previewUrl?: string;
 }
 
-// export class Origin {
-//   constructor(
-//     public outpoint: string,
-//     public nonce: number,
-//     public data: { [key: string]: any } = {}
-//   ) {}
-// }
-
-export type Origin = {
-  outpoint: string;
-  nonce?: number;
-  data?: OrdinalData;
-  num?: string;
-  map?: { [key: string]: any };
-};
-
 export enum Bsv20Status {
   Invalid = -1,
   Pending = 0,
   Valid = 1,
 }
-
-export type File = {
-  type: string;
-  size: number;
-  hash: string;
-  text?: string;
-  json?: { [key: string]: any };
-};
-
-export type Inscription = {
-  file: File;
-  fields?: { [key: string]: any };
-  parent?: string;
-};
-
-export type InscriptionData = {
-  type?: string;
-  data?: Buffer;
-};
-
-export type Ordinal = {
-  txid: string;
-  vout: number;
-  outpoint: string;
-  satoshis: number;
-  owner?: string;
-  script?: string;
-  spend?: string;
-  origin?: Origin;
-  height: number;
-  idx: number;
-  data: OrdinalData;
-};
-
-export type GetPaginatedOrdinals = {
-  from?: string;
-  limit?: number;
-  mimeType?: string;
-};
-
-export type PaginatedOrdinalsResponse = {
-  ordinals: Ordinal[];
-  from?: string;
-};
 
 export type SignedMessage = {
   address: string;
@@ -414,9 +327,6 @@ export type YoursProviderType = {
   getSocialProfile: () => Promise<SocialProfile | undefined>;
   getBalance: () => Promise<Balance | undefined>;
   getMNEEBalance: () => Promise<MNEEBalance | undefined>;
-  getOrdinals: (
-    params?: GetPaginatedOrdinals
-  ) => Promise<Ordinal[] | PaginatedOrdinalsResponse | undefined>;
   getBsv20s: () => Promise<Bsv20[] | undefined>;
   sendBsv: (params: SendBsv[]) => Promise<SendBsvResponse | undefined>;
   sendBsv20: (params: SendBsv20) => Promise<SendBsv20Response | undefined>;
