@@ -294,7 +294,7 @@ export interface OrdSchema {
   type: string;
   name: string;
   subType?: MapSubType;
-  subTypeData?: Record<string, string>;
+  subTypeData?: any;
   royalties?: string;
   previewUrl?: string;
 }

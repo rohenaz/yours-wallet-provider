@@ -5,7 +5,7 @@ description: Use when migrating, upgrading, or converting dApps from legacy your
 
 # Yours Wallet Migration Guide — Legacy Provider to BRC-100 CWI
 
-Use this skill when migrating an existing application from yours-wallet-provider v3.x (legacy) to v4.x+ (CWI/BRC-100).
+Follow this guide when migrating an existing application from yours-wallet-provider v3.x (legacy) to v4.x+ (CWI/BRC-100).
 
 For the complete legacy type definitions, see [references/legacy-types.md](references/legacy-types.md).
 
@@ -64,6 +64,7 @@ import { CWIProvider, useCWI } from 'yours-wallet-provider'
 
 function App() {
   return (
+    {/* Optional: timeout={10000} (default). Set to control how long to wait for CWI injection. */}
     <CWIProvider>
       <MyApp />
     </CWIProvider>
@@ -186,6 +187,12 @@ const ctx = createContext(wallet, { chain: 'main', services })
 | getMNEEBalance() | Use @mnee/ts-sdk or listOutputs({ basket: 'mnee' }) |
 | purchaseBsv20({ outpoint }) | createAction() with BSV20 purchase logic via @1sat/actions |
 
+### Methods Changed
+
+| Legacy | CWI Equivalent |
+|--------|----------------|
+| getNetwork() | wallet.getNetwork({}) — returns { network: 'mainnet' \| 'testnet' } |
+
 ### Methods Removed (No CWI Equivalent)
 
 | Legacy | Replacement |
@@ -193,7 +200,6 @@ const ctx = createContext(wallet, { chain: 'main', services })
 | isReady (property) | Check cwi.status !== 'loading' |
 | getExchangeRate() | Use an external BSV price API |
 | getSignatures({ rawtx, sigRequests }) | Not needed — createAction() handles signing internally. For advanced use, signAction(). |
-| getNetwork() | wallet.getNetwork({}) |
 | removeListener(event, fn) | No event system; use cwi.status reactivity |
 
 ### Signing & Encryption

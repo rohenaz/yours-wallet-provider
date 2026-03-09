@@ -46,7 +46,7 @@ export const CWIProvider = (props: CWIProviderProps) => {
   const foundRef = useRef(false);
 
   useEffect(() => {
-    foundRef.current = false;
+    if (foundRef.current) return;
 
     const markFound = (wallet: WalletInterface) => {
       if (foundRef.current) return;
