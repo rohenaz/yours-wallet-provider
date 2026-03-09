@@ -1,5 +1,5 @@
-import { ReactNode, createContext, useEffect, useState } from "react";
-import { YoursProviderType } from "../types/providerTypes";
+import { type ReactNode, createContext, useEffect, useState } from "react";
+import type { YoursProviderType } from "../types/providerTypes.js";
 
 export const YoursContext = createContext<YoursProviderType | undefined>(
   undefined
@@ -9,11 +9,16 @@ interface YoursProviderProps {
   children: ReactNode;
 }
 
+/**
+ * @deprecated Use `<CWIProvider>` instead.
+ * This provider connects to the legacy `window.yours` provider.
+ * Migrate to `<CWIProvider>` + `useCWI()` for BRC-100 WalletInterface support.
+ */
 export const YoursProvider = (props: YoursProviderProps) => {
   const { children } = props;
-
-  // It takes a moment for the yours wallet to get injected into the DOM. To use context we need an initial state;
-  const [yoursWallet, setYoursWallet] = useState<any>({ isReady: false });
+  const [yoursWallet, setYoursWallet] = useState<YoursProviderType | undefined>(
+    undefined
+  );
 
   useEffect(() => {
     const checkYoursWallet = () => {
@@ -23,7 +28,6 @@ export const YoursProvider = (props: YoursProviderProps) => {
     };
 
     checkYoursWallet();
-
     const intervalId = setInterval(checkYoursWallet, 1000);
     return () => clearInterval(intervalId);
   }, []);

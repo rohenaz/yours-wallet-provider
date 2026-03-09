@@ -1,38 +1,64 @@
 {
   "name": "yours-wallet-provider",
-  "version": "3.7.0",
+  "version": "4.0.0",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cwi": {
+      "types": "./dist/context/CWIContext.d.ts",
+      "import": "./dist/context/CWIContext.js"
+    },
+    "./legacy": {
+      "types": "./dist/context/YoursWalletContext.d.ts",
+      "import": "./dist/context/YoursWalletContext.js"
+    },
+    "./icon": {
+      "types": "./dist/components/YoursIcon.d.ts",
+      "import": "./dist/components/YoursIcon.js"
+    },
+    "./types": {
+      "types": "./dist/types/providerTypes.d.ts",
+      "import": "./dist/types/providerTypes.js"
+    }
+  },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
-    "react": ">=17.0.0",
-    "react-dom": ">=17.0.0",
-    "@bsv/sdk": ">=1.9.0"
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0",
+    "@bsv/sdk": "^2.0.0"
   },
   "devDependencies": {
-    "typescript": "^4.5.0",
-    "react": "^17.0.0",
-    "react-dom": "^17.0.0",
-    "@types/react": "^17.0.0",
-    "@types/react-dom": "^17.0.0",
-    "@bsv/sdk": "^1.9.24"
+    "typescript": "^5.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@bsv/sdk": "^2.0.1"
   },
   "keywords": [
     "wallet",
     "bsv",
     "bitcoin",
     "yours.org",
-    "yours wallet"
+    "yours wallet",
+    "cwi",
+    "brc-100",
+    "wallet-interface"
   ],
   "author": "Dan Wagner",
   "license": "MIT",
-  "description": "A provider that makes interacting with Yours Wallet a walk in the park.",
+  "description": "A React provider for integrating Yours Wallet's BRC-100 CWI (Cryptographic Wallet Interface) into your application.",
   "repository": {
     "type": "git",
     "url": "https://github.com/yours-org/yours-wallet-provider.git"

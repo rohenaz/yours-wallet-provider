@@ -1,72 +1,182 @@
-# Yours Wallet Provider 🌱
+# yours-wallet-provider
 
-A React provider to make interactions with [Yours Wallet](https://github.com/yours-org/yours-wallet) a breeze.
+React provider for integrating [Yours Wallet](https://yours.org) into your BSV application via the [BRC-100](https://github.com/bitcoin-sv/BRCs/blob/master/wallet/0100.md) Common Wallet Interface (CWI) standard.
 
-## Description
+## Install
 
-The Yours Wallet Provider simplifies the process of integrating Yours Wallet into your react application by creating a provider that wraps your application.
-
-For detailed instructions on integration and all available methods, be sure to check out the [Provider API Docs](https://panda-wallet.gitbook.io/provider-api/intro/introduction).
-
-## Installation
-
-Install the package using npm:
-
-```sh
-npm install yours-wallet-provider
+```bash
+bun add yours-wallet-provider
 ```
 
-## Usage
+**Peer dependencies** — install if not already present:
 
-### Setup the Provider
-
-First, wrap your application with the YoursProvider.
-
-```tsx
-//... other imports
-import { YoursProvider } from "yours-wallet-provider";
-
-const root = ReactDOM.createRoot(
-  document.getElementById("root") as HTMLElement
-);
-root.render(
-  <YoursProvider>
-    <App />
-  </YoursProvider>
-);
+```bash
+bun add react @bsv/sdk
 ```
 
-### Use the Wallet Hook
+> Requires React >= 19, `@bsv/sdk` ^2.0.0. ESM only (`"type": "module"`).
 
-You can now use the useYoursWallet hook to interact with the wallet.
+---
+
+## Quick Start
+
+Wrap your app (or any subtree) in `CWIProvider`, then call `useCWI()` in any child component.
 
 ```tsx
-import { useYoursWallet } from 'yours-wallet-provider';
+// main.tsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { CWIProvider } from 'yours-wallet-provider'
+import App from './App'
 
-function YourComponent() {
-  const wallet = useYoursWallet();
-  const isReady = wallet.isReady;
-  console.log(isReady);
-  // true
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <CWIProvider>
+      <App />
+    </CWIProvider>
+  </StrictMode>
+)
+```
 
-  return (
-    // Your TSX
-  );
+```tsx
+// App.tsx
+import { useCWI } from 'yours-wallet-provider'
+
+export default function App() {
+  const cwi = useCWI()
+
+  if (cwi.status === 'loading') return <p>Connecting to wallet...</p>
+  if (cwi.status === 'unavailable') return <p>Please install Yours Wallet</p>
+
+  // TypeScript narrows cwi.wallet to WalletInterface here
+  const handleGetKey = async () => {
+    const { publicKey } = await cwi.wallet.getPublicKey({ identityKey: true })
+    console.log(publicKey)
+  }
+
+  return <button onClick={handleGetKey}>Get Identity Key</button>
 }
 ```
 
-### Use the Yours.org Icon
+---
 
-You can also import the `YoursIcon` for use in your project.
+## API Reference
+
+### `<CWIProvider>`
+
+Detects `window.CWI` injection by the Yours Wallet browser extension. Listens for the `cwiReady` CustomEvent dispatched by the extension, with a 500ms polling fallback for extensions that do not emit the event. Transitions to `unavailable` after the timeout elapses with no wallet found.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `children` | `ReactNode` | — | Required. Child component tree. |
+| `timeout` | `number` | `10000` | Milliseconds to wait before marking status as `unavailable`. |
 
 ```tsx
-import { YoursIcon } from "yours-wallet-provider";
+<CWIProvider timeout={5000}>
+  <App />
+</CWIProvider>
+```
 
-function YourComponent() {
-  return (
-    <div>
-      <YoursIcon size="32px" />
-    </div>
-  );
+### `useCWI()`
+
+Returns a discriminated union. Narrow on `status` to access the wallet.
+
+```ts
+type CWIContextValue =
+  | { status: 'loading';     wallet: undefined }
+  | { status: 'available';   wallet: WalletInterface }
+  | { status: 'unavailable'; wallet: undefined }
+```
+
+`WalletInterface` is the BRC-100 standard interface from `@bsv/sdk`. It provides methods such as `createAction`, `getPublicKey`, `encrypt`, `decrypt`, `createHmac`, and more.
+
+`useCWI()` throws if called outside a `CWIProvider`.
+
+### Subpath exports
+
+| Import path | Contents |
+|-------------|----------|
+| `yours-wallet-provider` | All exports (default entry) |
+| `yours-wallet-provider/cwi` | `CWIProvider`, `CWIContext`, `CWIContextValue`, `CWIStatus` |
+| `yours-wallet-provider/legacy` | `YoursProvider`, `YoursContext` (deprecated) |
+| `yours-wallet-provider/icon` | `YoursIcon`, `YoursIconProps` |
+| `yours-wallet-provider/types` | Legacy `providerTypes` (deprecated) |
+
+---
+
+## Vanilla JS Usage
+
+If you are not using React, access `window.CWI` directly after the extension injects it.
+
+```ts
+function onWalletReady(wallet: import('@bsv/sdk').WalletInterface) {
+  wallet.getPublicKey({ identityKey: true }).then(({ publicKey }) => {
+    console.log('Identity key:', publicKey)
+  })
+}
+
+// Immediate check
+if (window.CWI) {
+  onWalletReady(window.CWI)
+} else {
+  // Listen for the injection event
+  window.addEventListener('cwiReady', () => {
+    if (window.CWI) onWalletReady(window.CWI)
+  }, { once: true })
 }
 ```
+
+---
+
+## Migration from v3
+
+v4.0 replaces the legacy `window.yours` API with the BRC-100 `window.CWI` standard. The legacy API remains available but is deprecated and will be removed in a future major version.
+
+For a step-by-step migration walkthrough, see the migration skill in `.claude/skills/yours-wallet-migration`.
+
+**Quick summary:**
+
+| v3 | v4 |
+|----|----|
+| `<YoursProvider>` | `<CWIProvider>` |
+| `useYoursWallet()` | `useCWI()` |
+| `window.yours` | `window.CWI` |
+| Custom provider types | `WalletInterface` from `@bsv/sdk` |
+
+---
+
+## Legacy API (deprecated)
+
+The following exports remain for backwards compatibility during migration. They connect to `window.yours` and will be removed in a future major version.
+
+```tsx
+// Deprecated — migrate to CWIProvider + useCWI()
+import { YoursProvider, useYoursWallet } from 'yours-wallet-provider'
+```
+
+`YoursProvider` polls `window.yours.isReady` every 1000ms. `useYoursWallet()` returns the raw `YoursProviderType` object and throws if called outside a `YoursProvider`.
+
+---
+
+## YoursIcon
+
+Renders the Yours Wallet SVG logo. Useful for wallet connection buttons and install prompts.
+
+```tsx
+import { YoursIcon } from 'yours-wallet-provider'
+// or from the subpath:
+// import { YoursIcon } from 'yours-wallet-provider/icon'
+
+<YoursIcon size="24px" />
+<YoursIcon size="1.5rem" />
+```
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `size` | `string` | Sets both `width` and `height`. Accepts any CSS length value. |
+
+---
+
+## License
+
+MIT
