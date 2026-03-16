@@ -9,6 +9,10 @@ Follow this guide when migrating an existing application from yours-wallet-provi
 
 For the complete legacy type definitions, see [references/legacy-types.md](references/legacy-types.md).
 
+## Critical Migration Rule
+
+**Never drop features.** Every section, button, input, and handler in the legacy app must have a corresponding implementation in the migrated app. If a legacy method has no direct CWI equivalent, provide a stub that logs a helpful message explaining the alternative. Do not remove UI elements.
+
 ## Why the API Changed
 
 The legacy provider was a custom wallet API specific to Yours Wallet. BRC-100 (CWI — Common Wallet Interface) is a Bitcoin SV standard that any compliant wallet can implement. Migrating means your dApp becomes wallet-agnostic: any BRC-100 wallet works, not just Yours.
@@ -24,17 +28,20 @@ The other major shift is the transaction model. Legacy returned raw hex ({ txid,
 | React provider | YoursProvider | CWIProvider |
 | React hook | useYoursWallet() | useCWI() |
 | Hook return type | YoursProviderType (all methods) | Discriminated union: { status, wallet } |
-| Peer dependency | None beyond React | @bsv/sdk (for types) |
+| Peer dependency | None beyond React | @bsv/sdk, @1sat/actions (for types and actions) |
 | Data model | Custom types per method | BRC-100 Actions, Baskets, Tags |
 | Permission model | Domain whitelist + popup | Originator-based WalletPermissionsManager |
 | Transaction format | Raw hex / custom objects | BEEF (BRC-95) |
 | Key derivation | DerivationTag (label/id/domain) | BRC-42/43 protocolID + keyID + counterparty |
+| Ordinals/tokens | Built-in wallet methods | @1sat/actions (action system) |
 
 ## Step 1 — Update Dependencies
 
 ```bash
-bun add yours-wallet-provider@latest @bsv/sdk
+bun add yours-wallet-provider@latest @bsv/sdk @1sat/actions @1sat/core
 ```
+
+> **Important:** `@1sat/actions` is required for ordinals, tokens, inscriptions, locks, and signing. Do not hand-roll scripts — use the action system.
 
 ## Step 2 — Swap React Provider and Hook
 
@@ -86,23 +93,75 @@ function MyApp() {
 
 useCWI() returns a discriminated union. When status === 'available', TypeScript narrows wallet to WalletInterface automatically — no null assertions needed.
 
-## Step 3 — Method Migration Reference
+## Step 3 — Set Up the Action Context
+
+Most operations use `@1sat/actions` which requires a context wrapping the wallet:
+
+```typescript
+import { createContext } from '@1sat/actions'
+
+// Inside your component, after wallet is available:
+const { wallet } = cwi
+const ctx = createContext(wallet, { services: undefined })
+
+// For operations needing network access (ordinals, tokens, locks):
+import { OneSatServices } from '@1sat/wallet'
+const services = new OneSatServices('main')
+const ctx = createContext(wallet, { services })
+```
+
+## Step 4 — Method Migration Reference
 
 ### Connection
 
 | Legacy | CWI Equivalent | Notes |
 |--------|----------------|-------|
 | connect() → identityPubKey | getPublicKey({ identityKey: true }) → .publicKey | No explicit connect; extension handles permission prompts automatically |
-| disconnect() | No equivalent | Connection lifecycle managed by extension |
-| isConnected() | Check cwi.status === 'available' | Status is reactive via the provider |
+| disconnect() | No equivalent — clear local state | Connection lifecycle managed by extension |
+| isConnected() | Check cwi.status === 'available', or try getPublicKey | Status is reactive via the provider |
+
+```typescript
+// Legacy
+const identityPubKey = await wallet.connect()
+
+// CWI — "connect" by requesting the identity key
+const { publicKey } = await wallet.getPublicKey({ identityKey: true })
+setIdentityPubKey(publicKey)
+
+// Legacy disconnect → just clear local state
+setIdentityPubKey('')
+
+// Legacy isConnected → check status or try getPublicKey
+const isConnected = cwi.status === 'available'
+```
 
 ### Identity & Keys
 
 | Legacy | CWI Equivalent |
 |--------|----------------|
 | getPubKeys() → { bsvPubKey, ordPubKey, identityPubKey } | getPublicKey({ identityKey: true }) for identity; derived keys via getPublicKey({ protocolID, keyID }) |
-| getAddresses() → { bsvAddress, ordAddress, identityAddress } | Derive from public keys using @bsv/sdk address utilities |
+| getAddresses() → { bsvAddress, ordAddress, identityAddress } | Derive from public keys using PublicKey.fromString(pk).toAddress() |
 | getSocialProfile() → { displayName, avatar } | BAP identity lookup via 1Sat API (not a wallet method) |
+
+```typescript
+import { PublicKey } from '@bsv/sdk'
+
+// Legacy getPubKeys
+const { bsvPubKey, ordPubKey, identityPubKey } = await wallet.getPubKeys()
+
+// CWI — three separate calls
+const identity = await wallet.getPublicKey({ identityKey: true })
+const bsv = await wallet.getPublicKey({ protocolID: [2, 'wallet'], keyID: 'bsv', counterparty: 'self' })
+const ord = await wallet.getPublicKey({ protocolID: [2, 'wallet'], keyID: 'ord', counterparty: 'self' })
+
+// Legacy getAddresses
+const { bsvAddress } = await wallet.getAddresses()
+
+// CWI — derive addresses from public keys
+const bsvAddress = PublicKey.fromString(bsv.publicKey).toAddress()
+const ordAddress = PublicKey.fromString(ord.publicKey).toAddress()
+const identityAddress = PublicKey.fromString(identity.publicKey).toAddress()
+```
 
 **Key derivation mapping:**
 
@@ -134,73 +193,195 @@ const utxos = await wallet.getPaymentUtxos()
 
 // CWI
 const { outputs } = await wallet.listOutputs({ basket: 'default', limit: 1000 })
-const satoshis = outputs.filter(o => o.spendable).reduce((sum, o) => sum + o.satoshis, 0)
+const spendable = outputs.filter(o => o.spendable)
+const satoshis = spendable.reduce((sum, o) => sum + o.satoshis, 0)
+
+// Legacy getMNEEBalance
+const { amount } = await wallet.getMNEEBalance()
+
+// CWI — query MNEE basket
+const { outputs: mneeOutputs } = await wallet.listOutputs({ basket: 'mnee', limit: 1000 })
+const mneeSpendable = mneeOutputs.filter(o => o.spendable)
 ```
 
-### Sending BSV
+### Sending BSV — Use @1sat/actions
 
 ```typescript
+import { sendBsv, createContext } from '@1sat/actions'
+
+const ctx = createContext(wallet, { services: undefined })
+
 // Legacy
 await wallet.sendBsv([
   { address: '1abc...', satoshis: 5000 },
   { address: '1def...', satoshis: 3000 }
 ])
 
-// CWI
-import { P2PKH } from '@bsv/sdk'
+// CWI — use sendBsv action
+await sendBsv.execute(ctx, {
+  requests: [
+    { address: '1abc...', satoshis: 5000 },
+    { address: '1def...', satoshis: 3000 },
+  ],
+})
 
-await wallet.createAction({
-  description: 'Send BSV payment',
-  outputs: [
-    { lockingScript: new P2PKH().lock('1abc...').toHex(), satoshis: 5000, outputDescription: 'Payment 1' },
-    { lockingScript: new P2PKH().lock('1def...').toHex(), satoshis: 3000, outputDescription: 'Payment 2' }
-  ]
+// Legacy OP_RETURN data
+await wallet.sendBsv([{ satoshis: 0, data: ['hello', 'world'] }])
+
+// CWI — sendBsv supports data arrays directly
+await sendBsv.execute(ctx, {
+  requests: [{ data: ['hello', 'world'], satoshis: 0 }],
 })
 ```
 
-### Ordinals & Inscriptions
-
-| Legacy | CWI Equivalent |
-|--------|----------------|
-| getOrdinals() | listOutputs({ basket: 'ordinals' }) + parse via 1Sat API |
-| inscribe(InscribeRequest[]) | createAction() with inscription outputs via @1sat/actions |
-| transferOrdinal({ address, origin, outpoint }) | createAction() spending the ordinal output via @1sat/actions |
-| purchaseOrdinal({ outpoint }) | createAction() with OrdLock unlock via @1sat/actions |
+### Signing Messages — Use @1sat/actions
 
 ```typescript
-// CWI — use @1sat/actions for ordinal operations
-import { createContext } from '@1sat/actions'
-import { OneSatServices } from '@1sat/client'
+import { signBsm, createContext } from '@1sat/actions'
 
-const services = new OneSatServices('main')
-const ctx = createContext(wallet, { chain: 'main', services })
-// Pass ctx to action functions like transferOrdinals(), listOrdinal(), etc.
+const ctx = createContext(wallet, { services: undefined })
+
+// Legacy
+const signed = await wallet.signMessage({ message: 'Hello', encoding: 'utf8' })
+
+// CWI — use signBsm action
+const result = await signBsm.execute(ctx, {
+  message: 'Hello',
+  encoding: 'utf8',
+})
+// result: { address, pubKey, message, sig }
 ```
 
-### Tokens (BSV20/BSV21/MNEE)
+### Ordinals — Use @1sat/actions
 
-| Legacy | CWI Equivalent |
-|--------|----------------|
-| getBsv20s() | listOutputs({ basket: 'bsv21', tags: [tokenId] }) |
-| sendBsv20({ idOrTick, address, amount }) | sendBsv21() from @1sat/actions with context |
-| sendMNEE(SendMNEE[]) | createAction() with MNEE transfer via @mnee/ts-sdk |
-| getMNEEBalance() | Use @mnee/ts-sdk or listOutputs({ basket: 'mnee' }) |
-| purchaseBsv20({ outpoint }) | createAction() with BSV20 purchase logic via @1sat/actions |
+```typescript
+import { getOrdinals, transferOrdinals, purchaseOrdinal, inscribe, createContext } from '@1sat/actions'
 
-### Methods Changed
+const ctx = createContext(wallet, { services })
 
-| Legacy | CWI Equivalent |
-|--------|----------------|
-| getNetwork() | wallet.getNetwork({}) — returns { network: 'mainnet' \| 'testnet' } |
+// Legacy getOrdinals
+const ordinals = await wallet.getOrdinals()
 
-### Methods Removed (No CWI Equivalent)
+// CWI
+const { outputs, BEEF } = await getOrdinals.execute(ctx, { limit: 100 })
+```
 
-| Legacy | Replacement |
-|--------|-------------|
-| isReady (property) | Check cwi.status !== 'loading' |
-| getExchangeRate() | Use an external BSV price API |
-| getSignatures({ rawtx, sigRequests }) | Not needed — createAction() handles signing internally. For advanced use, signAction(). |
-| removeListener(event, fn) | No event system; use cwi.status reactivity |
+```typescript
+// Legacy transferOrdinal
+await wallet.transferOrdinal({ address: '1abc...', origin: 'txid_0', outpoint: 'txid_0' })
+
+// CWI — get ordinal from wallet, then transfer
+const { outputs } = await getOrdinals.execute(ctx, { limit: 100 })
+const ordinal = outputs.find(o => o.outpoint === 'txid_0')
+await transferOrdinals.execute(ctx, {
+  transfers: [{ ordinal, address: '1abc...' }],
+})
+```
+
+```typescript
+// Legacy purchaseOrdinal
+await wallet.purchaseOrdinal({ outpoint: 'txid_0' })
+
+// CWI
+await purchaseOrdinal.execute(ctx, {
+  outpoint: 'txid_0',
+  marketplaceAddress: '1Market...',  // optional
+  marketplaceRate: 0.02,             // optional
+})
+```
+
+```typescript
+// Legacy inscribe
+await wallet.inscribe([{
+  address: '1abc...',
+  base64Data: btoa('Hello'),
+  mimeType: 'text/plain',
+  map: { app: 'myapp', type: 'test' },
+}])
+
+// CWI — use inscribe action
+await inscribe.execute(ctx, {
+  base64Content: btoa('Hello'),
+  contentType: 'text/plain',
+  map: { app: 'myapp', type: 'test' },
+})
+```
+
+### Tokens (BSV20/BSV21) — Use @1sat/actions
+
+```typescript
+import { getBsv21Balances, sendBsv21, purchaseBsv21, createContext } from '@1sat/actions'
+
+const ctx = createContext(wallet, { services })
+
+// Legacy getBsv20s
+const tokens = await wallet.getBsv20s()
+
+// CWI
+const balances = await getBsv21Balances.execute(ctx, {})
+```
+
+```typescript
+// Legacy sendBsv20
+await wallet.sendBsv20({ idOrTick: 'TOKEN_ID', address: '1abc...', amount: 100 })
+
+// CWI
+await sendBsv21.execute(ctx, {
+  tokenId: 'TOKEN_ID',
+  amount: '100',
+  address: '1abc...',
+})
+```
+
+```typescript
+// Legacy purchaseBsv20
+await wallet.purchaseBsv20({ outpoint: 'txid_0' })
+
+// CWI
+await purchaseBsv21.execute(ctx, {
+  tokenId: 'TOKEN_ID',
+  outpoint: 'txid_0',
+  amount: '100',
+})
+```
+
+### Lock BSV — Use @1sat/actions
+
+```typescript
+import { lockBsv, getLockData, createContext } from '@1sat/actions'
+
+const ctx = createContext(wallet, { services })
+
+// Legacy
+await wallet.lockBsv([{ address: '1abc...', blockHeight: 900000, sats: 10000 }])
+
+// CWI — use lockBsv action (address is derived by wallet, not specified)
+await lockBsv.execute(ctx, {
+  requests: [{ satoshis: 10000, until: 900000 }],
+})
+
+// Check lock status
+const data = await getLockData.execute(ctx, {})
+// data: { totalLocked, unlockable, nextUnlock }
+```
+
+### Broadcasting External Transactions
+
+```typescript
+// Legacy
+const txid = await wallet.broadcast({ rawtx: hexString })
+
+// CWI — use internalizeAction for external transactions
+// (createAction broadcasts automatically for wallet-created txs)
+import { Utils } from '@bsv/sdk'
+
+const txBytes = Utils.toArray(hexString, 'hex')
+await wallet.internalizeAction({
+  tx: txBytes,
+  outputs: [],
+  description: 'Broadcast external transaction',
+})
+```
 
 ### Signing & Encryption
 
@@ -230,26 +411,34 @@ const result = await wallet.decrypt({ ciphertext: Utils.toArray(ciphertext, 'bas
 const message = Utils.toUTF8(result.plaintext)
 ```
 
-### Broadcasting
+### Methods Changed
 
 | Legacy | CWI Equivalent |
 |--------|----------------|
-| broadcast({ rawtx, format }) → txid | createAction() broadcasts automatically; for external tx use internalizeAction() |
+| getNetwork() | wallet.getNetwork({}) — returns { network: 'mainnet' \| 'testnet' } |
 
-### Locking BSV
+### Methods Removed (No CWI Equivalent)
 
-| Legacy | CWI Equivalent |
-|--------|----------------|
-| lockBsv(LockRequest[]) → SendBsvResponse | createAction() with CLTV locking script (see 1sat-skills:timelock) |
+These methods have no wallet-level replacement. Provide a stub that logs a helpful message. **Do not remove the UI element.**
+
+| Legacy | Replacement |
+|--------|-------------|
+| isReady (property) | Check cwi.status !== 'loading' |
+| getExchangeRate() | Use an external BSV price API — stub with informational message |
+| getSocialProfile() | BAP identity lookup via 1Sat API using identity key — stub with informational message |
+| getSignatures({ rawtx, sigRequests }) | Not needed — createAction() handles signing internally. For advanced use, signAction(). |
+| removeListener(event, fn) | No event system; use cwi.status reactivity |
 
 ### Events
 
 | Legacy | CWI Equivalent |
 |--------|----------------|
-| on('signedOut', listener) | Detect via waitForAuthentication() |
-| on('switchAccount', listener) | Re-query identity key or listen for extension events |
+| on('signedOut', listener) | Detect via cwi.status becoming 'unavailable' or waitForAuthentication() |
+| on('switchAccount', listener) | Re-query getPublicKey({ identityKey: true }) to detect changes |
 
-## Step 4 — Transaction Format Changes
+Event buttons should remain in the UI but log informational messages explaining the CWI alternative.
+
+## Step 5 — Transaction Format Changes
 
 Legacy methods returned { txid, rawtx } as hex strings. CWI uses BEEF (BRC-95) which bundles the transaction with merkle proofs for SPV verification.
 
@@ -257,16 +446,12 @@ Legacy methods returned { txid, rawtx } as hex strings. CWI uses BEEF (BRC-95) w
 // Legacy
 const { txid, rawtx } = await wallet.sendBsv([...])
 
-// CWI — broadcasts automatically, returns txid
-const result = await wallet.createAction({ description: 'Payment', outputs: [...] })
+// CWI — @1sat/actions handle this automatically
+const result = await sendBsv.execute(ctx, { requests: [...] })
 // result.txid after broadcast
-
-// For payment verification (noSend pattern):
-const result = await wallet.createAction({ description: 'Payment', outputs: [...], options: { noSend: true } })
-// result.tx is BEEF bytes (number[]) — pass to server for SPV verification
 ```
 
-## Step 5 — Buffer and Encoding Changes
+## Step 6 — Buffer and Encoding Changes
 
 ```typescript
 // Remove all Buffer usage. Replace with @bsv/sdk Utils:
@@ -281,30 +466,41 @@ Utils.toUTF8(byteArray)          // number[] → string
 
 ## Common Migration Pitfalls
 
-1. **No connect() method** — CWI manages permissions automatically. Gate UI on cwi.status instead.
-2. **Raw hex is gone** — createAction() returns BEEF. Use Transaction.fromBEEF(result.tx) only if a dependency requires raw hex.
+1. **No connect() method** — CWI manages permissions automatically. Gate UI on cwi.status instead. Use getPublicKey({ identityKey: true }) as the "connect" equivalent.
+2. **Raw hex is gone** — @1sat/actions handle BEEF format automatically.
 3. **Buffer breaks in non-Node environments** — Use Utils from @bsv/sdk.
 4. **Don't mix old and new providers** — Remove all window.yours / window.panda references.
 5. **Key derivation security levels are new** — Choose protocolID[0] carefully: 1=public, 2=counterparty-specific (most common), 3=privileged.
 6. **Balance is no longer one call** — Sum satoshis from listOutputs().
-7. **Ordinal/token operations need @1sat/actions** — The wallet has no ordinal-specific methods. Always pass services when creating context: `createContext(wallet, { chain: 'main', services })`.
+7. **Use @1sat/actions for ordinals/tokens/locks** — Do not hand-roll locking scripts or inscription envelopes. Always use the action system.
 8. **Encryption is per-counterparty** — Legacy took an array of pubKeys. CWI takes a single counterparty. Loop for multiple recipients.
+9. **Never drop UI elements** — If a legacy feature has no CWI equivalent, keep the button and log a helpful message explaining the alternative.
 
 ## Migration Checklist
 
-- [ ] Update yours-wallet-provider to latest and add @bsv/sdk
+- [ ] Update yours-wallet-provider to latest and add @bsv/sdk, @1sat/actions, @1sat/core
 - [ ] Replace YoursProvider with CWIProvider
 - [ ] Replace useYoursWallet() with useCWI() — handle discriminated union { status, wallet }
+- [ ] Set up action context: createContext(wallet, { services })
 - [ ] Remove window.yours / window.panda references and type declarations
-- [ ] Convert sendBsv() to createAction() with P2PKH outputs
-- [ ] Convert signMessage() to createSignature() with protocolID/keyID
+- [ ] Convert connect() to getPublicKey({ identityKey: true }); stub disconnect()
+- [ ] Convert sendBsv() to sendBsv.execute(ctx, { requests }) from @1sat/actions
+- [ ] Convert signMessage() to signBsm.execute(ctx, { message }) from @1sat/actions
 - [ ] Convert encrypt()/decrypt() to CWI equivalents (protocolID/keyID/counterparty)
 - [ ] Convert generateTaggedKeys()/getTaggedKeys() to getPublicKey()
-- [ ] Update transaction handling for BEEF format
-- [ ] Remove connect()/disconnect() calls — use cwi.status for gating
+- [ ] Convert getOrdinals() to getOrdinals.execute(ctx) from @1sat/actions
+- [ ] Convert inscribe() to inscribe.execute(ctx) from @1sat/actions
+- [ ] Convert transferOrdinal() to transferOrdinals.execute(ctx) from @1sat/actions
+- [ ] Convert purchaseOrdinal() to purchaseOrdinal.execute(ctx) from @1sat/actions
+- [ ] Convert getBsv20s() to getBsv21Balances.execute(ctx) from @1sat/actions
+- [ ] Convert sendBsv20() to sendBsv21.execute(ctx) from @1sat/actions
+- [ ] Convert purchaseBsv20() to purchaseBsv21.execute(ctx) from @1sat/actions
+- [ ] Convert lockBsv() to lockBsv.execute(ctx) from @1sat/actions
+- [ ] Convert broadcast() to wallet.internalizeAction()
 - [ ] Replace getBalance() with listOutputs() aggregation
-- [ ] Update ordinal operations to use @1sat/actions with services
-- [ ] Update token operations to use @1sat/actions or @mnee/ts-sdk
+- [ ] Stub getExchangeRate() and getSocialProfile() with informational messages
+- [ ] Convert event listeners to informational stubs explaining CWI alternatives
 - [ ] Replace all Buffer usage with @bsv/sdk Utils
 - [ ] Review security levels on all protocolID usages
+- [ ] Verify all UI sections, buttons, and inputs are preserved 1:1
 - [ ] Test all permission flows with the updated extension
