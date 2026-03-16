@@ -116,7 +116,7 @@ const ctx = createContext(wallet, { services })
 
 | Legacy | CWI Equivalent | Notes |
 |--------|----------------|-------|
-| connect() → identityPubKey | getPublicKey({ identityKey: true }) → .publicKey | No explicit connect; extension handles permission prompts automatically |
+| connect() → identityPubKey | waitForAuthentication() then getPublicKey({ identityKey: true }) → .publicKey | waitForAuthentication() triggers the extension permission prompt; getPublicKey retrieves the identity key after auth |
 | disconnect() | No equivalent — clear local state | Connection lifecycle managed by extension |
 | isConnected() | Check cwi.status === 'available', or try getPublicKey | Status is reactive via the provider |
 
@@ -124,7 +124,9 @@ const ctx = createContext(wallet, { services })
 // Legacy
 const identityPubKey = await wallet.connect()
 
-// CWI — "connect" by requesting the identity key
+// CWI — waitForAuthentication() triggers the extension permission prompt,
+// then getPublicKey() retrieves the identity key
+await wallet.waitForAuthentication()
 const { publicKey } = await wallet.getPublicKey({ identityKey: true })
 setIdentityPubKey(publicKey)
 
@@ -433,7 +435,7 @@ These methods have no wallet-level replacement. Provide a stub that logs a helpf
 
 | Legacy | CWI Equivalent |
 |--------|----------------|
-| on('signedOut', listener) | Detect via cwi.status becoming 'unavailable' or waitForAuthentication() |
+| on('signedOut', listener) | Detect via cwi.status becoming 'unavailable', or call waitForAuthentication() which blocks until the user re-authenticates |
 | on('switchAccount', listener) | Re-query getPublicKey({ identityKey: true }) to detect changes |
 
 Event buttons should remain in the UI but log informational messages explaining the CWI alternative.
@@ -466,7 +468,7 @@ Utils.toUTF8(byteArray)          // number[] → string
 
 ## Common Migration Pitfalls
 
-1. **No connect() method** — CWI manages permissions automatically. Gate UI on cwi.status instead. Use getPublicKey({ identityKey: true }) as the "connect" equivalent.
+1. **connect() requires waitForAuthentication()** — Call `await wallet.waitForAuthentication()` first to trigger the extension permission prompt, then `getPublicKey({ identityKey: true })` to get the identity key. Without `waitForAuthentication()`, calls will fail with "Unauthorized!".
 2. **Raw hex is gone** — @1sat/actions handle BEEF format automatically.
 3. **Buffer breaks in non-Node environments** — Use Utils from @bsv/sdk.
 4. **Don't mix old and new providers** — Remove all window.yours / window.panda references.
@@ -483,7 +485,7 @@ Utils.toUTF8(byteArray)          // number[] → string
 - [ ] Replace useYoursWallet() with useCWI() — handle discriminated union { status, wallet }
 - [ ] Set up action context: createContext(wallet, { services })
 - [ ] Remove window.yours / window.panda references and type declarations
-- [ ] Convert connect() to getPublicKey({ identityKey: true }); stub disconnect()
+- [ ] Convert connect() to waitForAuthentication() + getPublicKey({ identityKey: true }); stub disconnect()
 - [ ] Convert sendBsv() to sendBsv.execute(ctx, { requests }) from @1sat/actions
 - [ ] Convert signMessage() to signBsm.execute(ctx, { message }) from @1sat/actions
 - [ ] Convert encrypt()/decrypt() to CWI equivalents (protocolID/keyID/counterparty)
