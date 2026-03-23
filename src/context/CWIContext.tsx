@@ -48,6 +48,14 @@ export const CWIProvider = (props: CWIProviderProps) => {
   useEffect(() => {
     if (foundRef.current) return;
 
+    // Check synchronously first — if CWI is already injected, dispatch
+    // immediately and skip setting up listeners/timers entirely.
+    if ("CWI" in window && window.CWI) {
+      foundRef.current = true;
+      dispatch({ type: "FOUND", wallet: window.CWI });
+      return;
+    }
+
     const markFound = (wallet: WalletInterface) => {
       if (foundRef.current) return;
       foundRef.current = true;
@@ -62,9 +70,6 @@ export const CWIProvider = (props: CWIProviderProps) => {
       }
       return false;
     };
-
-    // Already available (synchronous injection during document load)
-    if (checkCWI()) return;
 
     // Listen for the CustomEvent the extension dispatches on injection
     const onCWIReady = () => checkCWI();
