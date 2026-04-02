@@ -27,10 +27,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "tsconfig.json"
   ],
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
