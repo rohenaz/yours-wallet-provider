@@ -1,16 +1,19 @@
 import { type ReactNode, createContext, useEffect, useReducer, useRef } from "react";
 import type { WalletInterface } from "@bsv/sdk";
 
-export type CWIStatus = "loading" | "available" | "unavailable";
+export type CWIStatus = "loading" | "available" | "unavailable" | "signed_out";
 
 export type CWIContextValue =
   | { status: "loading"; wallet: undefined }
   | { status: "available"; wallet: WalletInterface }
-  | { status: "unavailable"; wallet: undefined };
+  | { status: "unavailable"; wallet: undefined }
+  | { status: "signed_out"; wallet: undefined };
 
 type Action =
   | { type: "FOUND"; wallet: WalletInterface }
-  | { type: "TIMED_OUT" };
+  | { type: "TIMED_OUT" }
+  | { type: "SIGNED_OUT" }
+  | { type: "ACCOUNT_CHANGED"; wallet: WalletInterface };
 
 function reducer(_state: CWIContextValue, action: Action): CWIContextValue {
   switch (action.type) {
@@ -18,6 +21,10 @@ function reducer(_state: CWIContextValue, action: Action): CWIContextValue {
       return { status: "available", wallet: action.wallet };
     case "TIMED_OUT":
       return { status: "unavailable", wallet: undefined };
+    case "SIGNED_OUT":
+      return { status: "signed_out", wallet: undefined };
+    case "ACCOUNT_CHANGED":
+      return { status: "available", wallet: action.wallet };
     default:
       return _state;
   }
@@ -37,6 +44,11 @@ interface CWIProviderProps {
  * Provides access to the BRC-100 WalletInterface injected by Yours Wallet
  * as `window.CWI`. Listens for the `cwiReady` CustomEvent dispatched by the
  * extension, with a polling fallback for extensions that don't emit the event.
+ *
+ * Also listens for `YoursEmitEvent` to detect sign-out and account switches:
+ * - `signedOut` → status becomes `'signed_out'`, wallet is cleared
+ * - `switchAccount` → status stays `'available'`, wallet reference is refreshed
+ *
  * Exposes the wallet and connection status via a discriminated union.
  */
 export const CWIProvider = (props: CWIProviderProps) => {
@@ -45,6 +57,7 @@ export const CWIProvider = (props: CWIProviderProps) => {
 
   const foundRef = useRef(false);
 
+  // Phase 1: Detect CWI injection
   useEffect(() => {
     if (foundRef.current) return;
 
@@ -93,6 +106,37 @@ export const CWIProvider = (props: CWIProviderProps) => {
 
     return cleanup;
   }, [timeout]);
+
+  // Phase 2: Listen for wallet state changes (sign-out, account switch)
+  useEffect(() => {
+    const onWalletEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { action: string; params?: unknown }
+        | undefined;
+      if (!detail?.action) return;
+
+      if (detail.action === "signedOut") {
+        foundRef.current = false;
+        dispatch({ type: "SIGNED_OUT" });
+      }
+
+      if (detail.action === "switchAccount") {
+        // After account switch, window.CWI still points to the same
+        // CWI substrate but the underlying account has changed.
+        // Re-read window.CWI to give consumers a fresh reference.
+        if ("CWI" in window && window.CWI) {
+          foundRef.current = true;
+          dispatch({ type: "ACCOUNT_CHANGED", wallet: window.CWI });
+        } else {
+          foundRef.current = false;
+          dispatch({ type: "SIGNED_OUT" });
+        }
+      }
+    };
+
+    window.addEventListener("YoursEmitEvent", onWalletEvent);
+    return () => window.removeEventListener("YoursEmitEvent", onWalletEvent);
+  }, []);
 
   return (
     <CWIContext.Provider value={value}>

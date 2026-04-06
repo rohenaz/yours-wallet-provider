@@ -433,12 +433,38 @@ These methods have no wallet-level replacement. Provide a stub that logs a helpf
 
 ### Events
 
+Yours Wallet dispatches a `YoursEmitEvent` CustomEvent on the window when the user signs out or switches accounts.
+
+**React (CWIProvider) — automatic:**
+
+```tsx
+const { status, wallet } = useCWI();
+// status === 'signed_out' when user signs out (wallet is undefined)
+// status === 'available' with refreshed wallet after account switch
+```
+
+The `CWIProvider` listens for `YoursEmitEvent` internally and updates its state automatically.
+
+**Vanilla JS / non-React — listen directly:**
+
+```js
+window.addEventListener('YoursEmitEvent', (e) => {
+  const { action } = e.detail;
+  if (action === 'signedOut') {
+    // User signed out — clear app state, show connect UI
+  }
+  if (action === 'switchAccount') {
+    // Account changed — re-fetch identity from window.CWI
+    // e.g. await window.CWI.getPublicKey({ identityKey: true, ... })
+  }
+});
+```
+
 | Legacy | CWI Equivalent |
 |--------|----------------|
-| on('signedOut', listener) | Detect via cwi.status becoming 'unavailable', or call waitForAuthentication() which blocks until the user re-authenticates |
-| on('switchAccount', listener) | Re-query getPublicKey({ identityKey: true }) to detect changes |
-
-Event buttons should remain in the UI but log informational messages explaining the CWI alternative.
+| on('signedOut', listener) | `useCWI()` status becomes `'signed_out'`, or listen for `YoursEmitEvent` with `detail.action === 'signedOut'` |
+| on('switchAccount', listener) | `useCWI()` re-dispatches with fresh wallet, or listen for `YoursEmitEvent` with `detail.action === 'switchAccount'` |
+| removeListener(event, fn) | Standard `removeEventListener('YoursEmitEvent', fn)` |
 
 ## Step 5 — Transaction Format Changes
 
